@@ -1,0 +1,116 @@
+version: 2
+
+models:
+  - name: dim_agent
+    description: |
+      Agent dimension. One row per agent_id seen in the portfolio history.
+    columns:
+      - name: agent_id
+        tests: [not_null, unique]
+      - name: first_seen_date
+        description: Earliest portfolio date this agent appears on.
+      - name: last_seen_date
+        description: Latest portfolio date this agent appears on.
+      - name: is_currently_active
+        description: True if last_seen_date matches the global max.
+
+  - name: dim_product
+    description: |
+      Product dimension. One row per product, enriched with the
+      deterministic `asset_class` bucket.
+    columns:
+      - name: product_id
+        tests: [not_null, unique]
+      - name: asset_class
+        description: Raw Indonesian fund-type label.
+        tests:
+          - accepted_values:
+              values: ['Saham', 'Ekuitas', 'Obligasi', 'Campuran', 'Penyertaan Terbatas', 'Syariah', 'Terproteksi', 'Money Market', 'Unknown']
+              severity: warn
+      - name: asset_class_bucket
+        description: |
+          Grouping bucket used by fct tables.
+          One of: equity_campuran | fixed_income.
+        tests:
+          - accepted_values:
+              values: ['equity_campuran', 'fixed_income']
+
+  - name: dim_customer
+    description: |
+      Customer dimension. One row per customer from the cis_customers
+      master file. Includes branch, KYC date, and customer type.
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: customer_name
+      - name: agent_id
+        description: Agent managing this customer.
+        tests:
+          - relationships:
+              to: ref('dim_agent')
+              field: agent_id
+      - name: branch_name
+      - name: approved_kyc_at
+      - name: customer_type
+      - name: kyc_tenure_days
+        description: Days since KYC approval (null if not approved).
+
+  - name: fct_agent_monthly_kpis
+    description: |
+      Per (agent, month) KPIs. Incremental + merge on
+      (agent_id, month_start_date) so reruns are idempotent and
+      late-arriving records within the 30-day lookback window
+      automatically re-merge into the affected month.
+    columns:
+      - name: agent_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_agent')
+              field: agent_id
+      - name: month_start_date
+        description: First day of the KPI month (DATE).
+        tests: [not_null]
+      - name: total_aum
+        description: Sum of month-end ending_balance (IDR).
+        tests:
+          - non_negative:
+              severity: warn
+      - name: aum_equity_campuran
+        description: AUM held in Equity / Campuran products.
+        tests:
+          - non_negative:
+              severity: warn
+      - name: aum_fixed_income
+        description: AUM held in Fixed Income products.
+        tests:
+          - non_negative:
+              severity: warn
+      - name: aum_unknown_class
+        description: |
+          AUM held in products that did not match any classifier rule.
+          Tested to be 0 — any positive value means a new product was
+          added without updating `classify_asset`.
+      - name: pct_equity_campuran
+        description: Share of total AUM in equity/campuran.
+      - name: pct_fixed_income
+        description: Share of total AUM in fixed income.
+      - name: core_customer_count
+        description: |
+          Distinct customers with month-end AUM > threshold (IDR 100M).
+      - name: total_customer_count
+        description: Distinct customers with any month-end AUM.
+      - name: core_customer_threshold_idr
+        description: Threshold used to compute core_customer_count.
+    tests:
+      # Composite uniqueness — required for the incremental merge to be
+      # idempotent.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - agent_id
+            - month_start_date
+      # Custom singular tests live under tests/singular/ and are
+      # auto-discovered. Listed here for documentation only — they are:
+      #   - asset_allocation_reconciles
+      #   - core_customers_threshold_satisfied
+      #   - no_future_month_kpis

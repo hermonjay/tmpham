@@ -1,0 +1,16 @@
+# Local profile for the project. Same DuckDB file the ingest layer writes to.
+# Not committed credentials — local file path only.
+analytics_case_study:
+  target: prod
+  outputs:
+    prod:
+      type: duckdb
+      path: ../duckdb/analytics.duckdb
+      threads: 4
+      # Fallback schema for models that don't set +schema. Matches DuckDB's
+      # built-in default. All layered models override this via dbt_project.yml
+      # + the generate_schema_name macro (no env prefix).
+      schema: main
+      # Keep all schemas in the same file; dbt-duckdb supports it natively.
+      extensions:
+        - json

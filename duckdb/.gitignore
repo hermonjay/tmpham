@@ -1,0 +1,4 @@
+# Local DuckDB database files live here. Tracked: .gitignore itself.
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp

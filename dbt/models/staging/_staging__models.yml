@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: stg_user_portfolio_histories
+    description: |
+      Cleaned portfolio entries. Grain: one row per
+      (portfolio_id, snapshot_date). Acts as the only fact-shaped
+      input into the marts layer.
+    columns:
+      - name: portfolio_id
+        description: Surrogate key of the portfolio entry.
+        tests: [not_null]
+      - name: agent_id
+        description: Servicing agent.
+        tests: [not_null]
+      - name: product_id
+        description: FK to stg_products.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_products')
+              field: product_id
+      - name: customer_id
+        description: FK to stg_customers.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: unit_holder_id
+              severity: warn
+      - name: portfolio_date
+        description: As-of date for the portfolio entry.
+        tests:
+          - not_null
+          - no_future_dates
+      - name: ending_balance
+        description: Closing balance (IDR). May be 0; never expected negative.
+      - name: is_deleted
+        description: Soft-delete flag.
+      - name: portfolio_month
+        description: First-of-month derived from portfolio_date.
+
+  - name: stg_customers
+    description: |
+      Customer master loaded from cis_customers.csv.
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: customer_name
+        description: Customer display name.
+      - name: unit_holder_id
+        description: Unit holder identifier.
+      - name: agent_id
+        description: FK to agent.
+      - name: branch_name
+        description: Branch name.
+      - name: approved_kyc_at
+        description: KYC approval timestamp.
+      - name: customer_type
+        description: Customer type (Individual, Institution).
+
+  - name: stg_products
+    description: |
+      Product master enriched with the deterministic `asset_class`
+      bucket derived from product name keyword matching.
+    columns:
+      - name: product_id
+        tests: [not_null, unique]
+      - name: product_code
+        description: HPAM fund identifier (hpfid).
+      - name: product_name
+        description: Human-readable product name.
+      - name: isin
+        description: SID identifier used as ISIN equivalent.
+      - name: currency
+        description: Currency code (always IDR).
+      - name: asset_class
+        description: |
+          Indonesian fund-type label derived from product name keywords.
+          One of: Saham, Ekuitas, Obligasi, Campuran, Penyertaan Terbatas,
+          Syariah, Terproteksi, Money Market, Unknown.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Saham', 'Ekuitas', 'Obligasi', 'Campuran', 'Penyertaan Terbatas', 'Syariah', 'Terproteksi', 'Money Market', 'Unknown']
+              severity: warn

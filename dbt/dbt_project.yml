@@ -1,0 +1,75 @@
+# dbt project — Problem 2: dbt layer on top of DuckDB raw tables.
+#
+# Architecture:
+#   stg     -> views (light cleaning + typing)
+#   mart    -> tables (dimensions + facts, marts materialised)
+#   report  -> views (presentation KPIs)
+#
+# Naming: snake_case everywhere. Each layer prefixed:
+#   stg_*, dim_*, fct_*, rpt_*.
+
+name: 'analytics_case_study'
+version: '0.2.0'
+config-version: 2
+
+profile: 'analytics_case_study'
+
+# Model-paths are the conventional layout. Tests live under `tests/`.
+model-paths: ['models']
+analysis-paths: ['analyses']
+test-paths: ['tests']
+macro-paths: ['macros']
+seed-paths: ['seeds']
+snapshot-paths: ['snapshots']
+
+target-path: 'target'
+clean-targets:
+  - 'target'
+  - 'dbt_packages'
+
+# Quoting — DuckDB is case-insensitive but quoting keeps names
+# round-trip safe with reserved words like `date`.
+quoting:
+  database: false
+  schema: false
+  identifier: false
+
+# --------------------------------------------------------------------
+# Per-layer materialisation and schemas.
+# --------------------------------------------------------------------
+models:
+  analytics_case_study:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+      +tags: ['marts']
+      fct_agent_monthly_kpis:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ['agent_id', 'month_start_date']
+        +on_schema_change: append_new_columns
+        +tags: ['incremental']
+    reports:
+      +materialized: view
+      +schema: reports
+      +tags: ['reports']
+
+# --------------------------------------------------------------------
+# DuckDB-specific performance levers.
+# --------------------------------------------------------------------
+# DuckDB doesn't have native partitioning/clustering like BigQuery,
+# but does support ORDER BY on table creation and ZoneMap pruning.
+# We pass through engine-specific config via per-model +order_by/+index.
+# The macros below emit ORDER BY on CREATE TABLE for the marts layer.
+vars:
+  # Core-customer threshold (IDR). Month-end AUM strictly greater than this.
+  core_customer_threshold_idr: 100000000
+  # As-of cutoff: any portfolio entry with date > this is rejected.
+  # Defaults to current_date. Override at run-time to freeze a backfill.
+  data_as_of_date: null

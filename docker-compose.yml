@@ -1,0 +1,137 @@
+# docker compose up
+#
+# Three concerns, two services:
+#   1. analytics-app — Python/uv ingestion app writing into a DuckDB file in a named volume.
+#   2. metabase       — BI layer; metadata persisted in its own named volume (H2 file backend).
+#                       Built from metabase/Dockerfile so the DuckDB driver plugin is pre-loaded;
+#                       reads the analytics DuckDB file via the shared duckdb-data volume (ro).
+#
+# Healthchecks gate startup ordering: metabase waits for analytics-app to be healthy
+# (DuckDB file exists + readable) before booting.
+
+name: analytics-case-study
+
+x-common-env: &common-env
+  TZ: ${TZ:-UTC}
+
+services:
+  analytics-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: analytics-app:local
+    container_name: analytics-app
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      DUCKDB_PATH: ${DUCKDB_PATH:-/app/duckdb/analytics.duckdb}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Tell the app where to find snapshots. Mounted read-only below.
+      SNAPSHOT_DIR: ${SNAPSHOT_DIR:-/app/data/snapshots}
+    volumes:
+      # Bind mount = DuckDB file lives on the host under ./duckdb/, so dbt
+      # (host) and the analytics-app + metabase containers all read/write
+      # the same file. Named volumes would isolate the container copy from
+      # host dbt runs.
+      - ./duckdb:/app/duckdb
+      # Source snapshots are read-only inputs from the host checkout.
+      - ./data:/app/data:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        # Healthy = DuckDB file exists, is non-empty, and can be reopened.
+        # Ingestion runs once on container start; after it finishes the file
+        # lives in the named volume forever.
+        - >-
+          python -c "import os,duckdb;
+          p=os.environ['DUCKDB_PATH'];
+          assert os.path.exists(p) and os.path.getsize(p) > 0, 'duckdb file missing or empty';
+          duckdb.connect(p,read_only=True).close()"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  metabase:
+    image: analytics-metabase:local
+    container_name: metabase
+    restart: unless-stopped
+    build:
+      context: ./metabase
+      dockerfile: Dockerfile
+      args:
+        # Pin both together; see metabase/Dockerfile.
+        METABASE_VERSION: ${METABASE_VERSION:-v0.59.x}
+        DUCKDB_DRIVER_VERSION: ${DUCKDB_DRIVER_VERSION:-1.5.3.0}
+    environment:
+      <<: *common-env
+      # H2 file backend — Metabase metadata lives in the named volume below.
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase.db/metabase.db
+      MB_JETTY_HOST: 0.0.0.0
+      MB_JETTY_PORT: "3000"
+      # Disable anonymous telemetry / version checks for deterministic offline runs.
+      MB_CHECK_FOR_UPDATES: "false"
+      MB_SEND_EMAIL_ON_FIRST_LOGIN_FROM_NEW_DEVICE: "false"
+      MB_ANON_TRACKING_ENABLED: "false"
+      # Surface the DuckDB path to the admin UI; the actual value used at query
+      # time is whatever you type into the database connection form. Keeping it
+      # here just makes it copy-pastable from `docker inspect`.
+      META_DUCKDB_PATH: /app/duckdb/analytics.duckdb
+    ports:
+      - "${MB_PORT:-3000}:3000"
+    volumes:
+      - metabase-data:/metabase.db
+      # Same bind mount as analytics-app (read-only). DuckDB allows many
+      # readers concurrently as long as they open with access_mode=read_only,
+      # which is what we recommend in the Metabase DB connection form.
+      - ./duckdb:/app/duckdb:ro
+    healthcheck:
+      # /api/health returns 200 once Metabase is ready, 503 during bootstrap.
+      # `-f` makes curl exit non-zero on 4xx/5xx so the healthcheck reflects
+      # actual readiness rather than just `is the JVM up`.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    depends_on:
+      analytics-app:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: analytics-app:local
+    container_name: scheduler
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      DUCKDB_PATH: ${DUCKDB_PATH:-/app/duckdb/analytics.duckdb}
+      SNAPSHOT_DIR: ${SNAPSHOT_DIR:-/app/data/snapshots}
+      DBT_PROJECT_DIR: /app/dbt
+      DBT_PROFILES_DIR: /app/dbt
+      DBT_TARGET: ${DBT_TARGET:-prod}
+      ORCH_RUNNER: direct
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: Asia/Bangkok
+      # Point Prefect at self-hosted server (or Cloud if you set PREFECT_API_URL).
+      PREFECT_API_URL: ${PREFECT_API_URL:-}
+    command:
+      [
+        "sh", "-c",
+        "prefect server start --host 0.0.0.0 &\nsleep 5\nuv run python -m orchestration.deployments.schedule serve_scheduled",
+      ]
+    ports:
+      - "${PREFECT_PORT:-4200}:4200"
+    volumes:
+      - ./duckdb:/app/duckdb
+      - ./data:/app/data:ro
+    depends_on:
+      analytics-app:
+        condition: service_healthy
+
+volumes:
+  metabase-data:
+    name: analytics-metabase

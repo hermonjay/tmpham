@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: rpt_agent_monthly_performance
+    description: |
+      Presentation view over `fct_agent_monthly_kpis`. Adds
+      month-over-month deltas, within-month rank by AUM, and a
+      portfolio-profile bucket (Fixed Income Heavy / Equity Heavy /
+      Balanced). This is the model Metabase dashboards query.
+    columns:
+      - name: agent_id
+        description: Agent business key.
+      - name: month_start_date
+        description: First day of the KPI month.
+      - name: total_aum
+        description: Total AUM for the agent in this month (IDR).
+      - name: pct_equity_campuran
+        description: Share of AUM in equity/campuran.
+      - name: pct_fixed_income
+        description: Share of AUM in fixed income.
+      - name: core_customer_count
+        description: Distinct customers above the core threshold.
+      - name: rank_aum_in_month
+        description: Rank of agent by total_aum within the month.
+      - name: aum_mom_change_idr
+        description: MoM absolute change in total AUM (IDR).
+      - name: aum_mom_change_pct
+        description: MoM relative change in total AUM.
+      - name: portfolio_profile
+        description: |
+          Convenience label: Fixed Income Heavy (>=60% FI), Equity Heavy
+          (>=60% Equity), Balanced (anything else).
+

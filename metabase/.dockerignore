@@ -1,0 +1,5 @@
+# Keep build context minimal — the Dockerfile only needs itself + the
+# upstream URL it ADDs. Prevents accidental bind-mounts of dashboards/
+# etc. into the image.
+*
+!Dockerfile

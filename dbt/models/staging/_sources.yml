@@ -1,0 +1,96 @@
+version: 2
+
+sources:
+  - name: raw
+    description: |
+      Raw layer loaded by the Python ingestion pipeline
+      (`ingest/run.py`). Tables here mirror upstream CSVs one-to-one;
+      dbt is the first place where business logic is applied.
+    schema: raw
+    tables:
+      - name: cis_user_portfolio_histories
+        description: |
+          Full history of customer / product portfolios.
+          Each row is one snapshot file appended with an `ingested_at`
+          timestamp parsed from the source filename.
+          Grain: one row per (id, snapshot_date). May contain duplicates
+          across snapshot dates — deduplication happens downstream.
+        columns:
+          - name: id
+            description: Portfolio entry surrogate key.
+            tests: [not_null]
+          - name: agent_id
+            description: Agent servicing the portfolio.
+          - name: selling_agent_id
+            description: Agent who originally sold the product.
+          - name: product_id
+            description: FK to raw.cis_products.id.
+          - name: unit_holder_id
+            description: FK to raw.cis_customers.id.
+          - name: date
+            description: Portfolio as-of date (varchar, ISO yyyy-MM-dd).
+          - name: snapshot_date
+            description: Date the CSV snapshot was taken.
+          - name: ending_balance
+            description: Month/cycle ending balance (IDR).
+          - name: profit_or_loss
+            description: P&L on the position (IDR).
+          - name: is_deleted
+            description: Soft-delete flag.
+
+      - name: cis_customers
+        description: |
+          Customer master loaded from data/cis_customers.csv.
+          Grain: one row per customer.
+        columns:
+          - name: customer_id
+            description: Customer surrogate key.
+            tests: [not_null, unique]
+          - name: customer_name
+            description: Customer display name.
+          - name: unit_holder_id
+            description: Unit holder identifier.
+          - name: sid
+            description: SID identifier.
+          - name: agent_id
+            description: FK to agent.
+          - name: agent_code
+            description: Agent code.
+          - name: agent_name
+            description: Agent display name.
+          - name: agent_name_clean
+            description: Cleaned agent name.
+          - name: branch_name
+            description: Branch name.
+          - name: approved_kyc_at
+            description: KYC approval timestamp.
+          - name: customer_type
+            description: Customer type (Individual, Institution).
+
+      - name: cis_products
+        description: |
+          Product master loaded from data/cis_products.csv.
+          Indonesian mutual funds (HPAM). Asset classification
+          is derived from product name by the staging model.
+        columns:
+          - name: id
+            description: Product business key.
+            tests: [not_null, unique]
+          - name: hpfid
+            description: HPAM fund identifier.
+          - name: siar_code
+            description: SIAR code.
+          - name: sinvest_code
+            description: SInvest code.
+          - name: sid
+            description: SID identifier.
+          - name: ifua
+            description: IFUA code.
+          - name: ifca
+            description: IFCA code.
+          - name: name
+            description: Human-readable product name.
+          - name: logo
+            description: Logo URL or path.
+          - name: description
+            description: Product description.

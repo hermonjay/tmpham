@@ -1,0 +1,44 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# ---- Secrets / env ----
+# Track the template (.env.example), never the real file.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- DuckDB ----
+# Local database files (history + latest + the analytics warehouse).
+duckdb/*.duckdb
+duckdb/*.duckdb.wal
+duckdb/*.duckdb.tmp
+
+# ---- dbt artefacts (regenerable) ----
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Editor / OS ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.orig
